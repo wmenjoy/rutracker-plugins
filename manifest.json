@@ -6,7 +6,8 @@
   "permissions": [
     "storage",
     "activeTab",
-    "scripting"
+    "scripting",
+    "contextMenus"
   ],
   "host_permissions": [
     "*://*.rutracker.org/*"
@@ -35,5 +36,9 @@
     "32": "src/assets/icon32.png",
     "48": "src/assets/icon48.png",
     "128": "src/assets/icon128.png"
+  },
+  "options_ui": {
+    "page": "src/options/index.html",
+    "open_in_tab": true
   }
 } 

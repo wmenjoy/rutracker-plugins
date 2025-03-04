@@ -4,11 +4,12 @@ export interface TorrentItem {
   url: string;
   downloadUrl: string;
   isVisited: boolean;
+  updateDate: string;
+  isUnread: boolean;
 }
 
-export type Message = {
-  action: 'scan';
-} | {
-  action: 'download';
-  url: string;
-}; 
+export interface Message {
+  action: 'scan' | 'download' | 'batchDownload' | 'goToNextPage' | 'injectToolbar';
+  url?: string;
+  urls?: string[];
+} 
