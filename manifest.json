@@ -7,11 +7,15 @@
     "storage",
     "activeTab",
     "scripting",
-    "contextMenus"
+    "contextMenus",
+    "downloads"
   ],
   "host_permissions": [
     "*://*.rutracker.org/*"
   ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com"
+  },
   "action": {
     "default_popup": "src/popup/index.html",
     "default_icon": {

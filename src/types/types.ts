@@ -9,7 +9,10 @@ export interface TorrentItem {
 }
 
 export interface Message {
-  action: 'scan' | 'download' | 'batchDownload' | 'goToNextPage' | 'injectToolbar';
+  action: string;
   url?: string;
   urls?: string[];
+  status?: string;
+  error?: string;
+  filename?: string;
 } 

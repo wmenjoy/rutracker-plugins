@@ -16,6 +16,96 @@ chrome.runtime.onInstalled.addListener(async () => {
   });
 });
 
+// 处理下载请求
+chrome.runtime.onMessage.addListener((message, sender) => {
+  if (message.action === 'downloadTorrent') {
+    handleDownload(message.url, sender.tab?.id, message.filename);
+    return true;
+  }
+});
+
+// 下载处理函数
+async function handleDownload(url: string, tabId?: number, filename?: string) {
+  try {
+    // 使用 chrome.downloads API 下载文件，并显示保存对话框
+    const downloadId = await chrome.downloads.download({
+      url: url,
+      filename: filename || `rutracker-${new Date().getTime()}.torrent`,
+      saveAs: true // 显示"另存为"对话框，让用户选择保存位置
+    });
+
+    // 监听下载状态变化
+    chrome.downloads.onChanged.addListener(function onChanged(delta) {
+      if (delta.id === downloadId) {
+        // 如果下载被取消或发生错误
+        if (delta.state?.current === 'interrupted' || delta.error) {
+          chrome.downloads.onChanged.removeListener(onChanged);
+          // 获取错误详情
+          chrome.downloads.search({ id: downloadId }, (downloads) => {
+            const download = downloads[0];
+            let errorMessage = 'Download failed';
+            
+            if (download?.error) {
+              switch (download.error) {
+                case 'FILE_FAILED':
+                  errorMessage = 'File download failed. Please check your connection.';
+                  break;
+                case 'FILE_ACCESS_DENIED':
+                  errorMessage = 'Access denied. Please check your permissions.';
+                  break;
+                case 'FILE_NO_SPACE':
+                  errorMessage = 'Not enough disk space.';
+                  break;
+                case 'FILE_NAME_TOO_LONG':
+                  errorMessage = 'File name is too long.';
+                  break;
+                case 'FILE_TOO_LARGE':
+                  errorMessage = 'File is too large.';
+                  break;
+                case 'USER_CANCELED':
+                  errorMessage = 'Download cancelled.';
+                  break;
+                default:
+                  errorMessage = `Download failed: ${download.error}`;
+              }
+            }
+            
+            // 通知内容脚本重置下载按钮
+            if (tabId) {
+              chrome.tabs.sendMessage(tabId, { 
+                action: 'downloadStatus',
+                status: 'error',
+                error: errorMessage
+              });
+            }
+          });
+        }
+        // 如果下载完成
+        else if (delta.state?.current === 'complete') {
+          chrome.downloads.onChanged.removeListener(onChanged);
+          // 通知内容脚本更新状态
+          if (tabId) {
+            chrome.tabs.sendMessage(tabId, { 
+              action: 'downloadStatus',
+              status: 'completed'
+            });
+          }
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Failed to download torrent:', error);
+    // 发送错误状态
+    if (tabId) {
+      chrome.tabs.sendMessage(tabId, { 
+        action: 'downloadStatus',
+        status: 'error',
+        error: error instanceof Error ? error.message : 'Failed to start download'
+      });
+    }
+  }
+}
+
 // 监听标签页更新事件
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (

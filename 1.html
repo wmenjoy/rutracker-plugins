@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>笔记卡片生成器</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- HTML2Canvas 导出功能 -->
+    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+    <!-- 字体加载 -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Courier+Prime&family=Noto+Serif+SC:wght@400;700&family=Roboto+Mono&family=Source+Code+Pro&family=Lora&family=Playfair+Display&family=Ma+Shan+Zheng&family=Noto+Sans+SC&family=ZCOOL+XiaoWei&family=ZCOOL+QingKe+HuangYou&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      .theme-light {
+        --bg-primary: #f8fafc;
+        --bg-card: rgba(255, 255, 255, 0.85);
+        --text-primary: #334155;
+        --accent-color: #3b82f6;
+        --shadow-color: rgba(0, 0, 0, 0.1);
+        --input-bg: rgba(255, 255, 255, 0.8);
+        --input-text: #334155;
+        --input-border: #e2e8f0;
+      }
+
+      .theme-dark {
+        --bg-primary: #0f172a;
+        --bg-card: rgba(30, 41, 59, 0.85);
+        --text-primary: #e2e8f0;
+        --accent-color: #60a5fa;
+        --shadow-color: rgba(0, 0, 0, 0.5);
+        --input-bg: rgba(15, 23, 42, 0.8);
+        --input-text: #e2e8f0;
+        --input-border: #334155;
+      }
+
+      .theme-warm {
+        --bg-primary: #fffbeb;
+        --bg-card: rgba(254, 243, 199, 0.85);
+        --text-primary: #78350f;
+        --accent-color: #f59e0b;
+        --shadow-color: rgba(120, 53, 15, 0.1);
+        --input-bg: rgba(255, 251, 235, 0.8);
+        --input-text: #78350f;
+        --input-border: #fbbf24;
+      }
+
+      body {
+        background-color: var(--bg-primary);
+        color: var(--text-primary);
+        transition: all 0.3s ease;
+      }
+
+      .card {
+        background-color: var(--bg-card);
+        box-shadow: 0 8px 30px var(--shadow-color);
+        transition: all 0.3s ease;
+      }
+
+      .floating-bg {
+        position: fixed;
+        width: 40vw;
+        height: 40vw;
+        border-radius: 50%;
+        filter: blur(80px);
+        opacity: 0.6;
+        z-index: -1;
+        animation: floating 15s infinite ease-in-out;
+      }
+
+      .bg-1 {
+        background: var(--accent-color);
+        top: -10%;
+        left: -10%;
+        animation-delay: 0s;
+      }
+
+      .bg-2 {
+        background: var(--accent-color);
+        bottom: -10%;
+        right: -10%;
+        animation-delay: -5s;
+      }
+
+      @keyframes floating {
+        0% {
+          transform: translate(0, 0) rotate(0deg);
+        }
+        25% {
+          transform: translate(5%, 5%) rotate(5deg);
+        }
+        50% {
+          transform: translate(0, 10%) rotate(0deg);
+        }
+        75% {
+          transform: translate(-5%, 5%) rotate(-5deg);
+        }
+        100% {
+          transform: translate(0, 0) rotate(0deg);
+        }
+      }
+
+      .en-text {
+        /* 英文默认字体 */
+        font-family: "Courier Prime", monospace;
+      }
+
+      .zh-text {
+        /* 中文默认字体 */
+        font-family: "Noto Serif SC", serif;
+      }
+
+      /* 自定义滚动条 */
+      ::-webkit-scrollbar {
+        width: 8px;
+      }
+
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
+      ::-webkit-scrollbar-thumb {
+        background: var(--accent-color);
+        border-radius: 4px;
+      }
+
+      /* 固定卡片尺寸 */
+      .card-container {
+        display: flex;
+        justify-content: center;
+        align-items: flex-start;
+        width: 100%;
+      }
+
+      /* 调整卡片内容自适应 */
+      .content-wrapper {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        padding: 1.5rem;
+      }
+
+      /* 调整主要布局结构 */
+      @media (min-width: 768px) {
+        .main-container {
+          display: flex;
+          justify-content: center;
+          align-items: flex-start;
+          gap: 2rem;
+        }
+
+        .control-panel {
+          width: 40%;
+          max-width: 400px;
+        }
+
+        .preview-panel {
+          width: 60%;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+        }
+      }
+
+      /* 小屏幕布局调整 */
+      @media (max-width: 767px) {
+        .main-container {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          width: 100%;
+        }
+
+        .control-panel,
+        .preview-panel {
+          width: 100%;
+          max-width: 500px;
+        }
+
+        .preview-panel {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+        }
+      }
+
+      /* 输入框和选择框样式 */
+      input,
+      textarea,
+      select {
+        background-color: var(--input-bg);
+        color: var(--input-text);
+        border-color: var(--input-border);
+        transition: all 0.3s ease;
+      }
+
+      input::placeholder,
+      textarea::placeholder {
+        color: var(--input-text);
+        opacity: 0.6;
+      }
+    </style>
+  </head>
+  <body
+    class="theme-light min-h-screen flex flex-col items-center justify-center py-8 px-4"
+  >
+    <!-- 浮动背景 -->
+    <div class="floating-bg bg-1"></div>
+    <div class="floating-bg bg-2"></div>
+
+    <header class="w-full max-w-4xl text-center mb-8">
+      <h1 class="text-3xl font-bold mb-2">笔记卡片生成器</h1>
+      <p class="text-sm opacity-75">
+        将文字转化为精美的视觉卡片 | 支持中英文智能排版
+      </p>
+    </header>
+
+    <main class="w-full max-w-5xl main-container">
+      <!-- 控制面板 -->
+      <div class="control-panel space-y-6">
+        <div class="card p-6 rounded-xl">
+          <h2 class="text-xl font-bold mb-4">内容编辑</h2>
+          <div class="space-y-4">
+            <div>
+              <label class="block text-sm font-medium mb-1">卡片内容</label>
+              <textarea
+                id="content-input"
+                class="w-full h-40 p-3 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="在此输入您想要展示的文字内容..."
+              ></textarea>
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">署名</label>
+              <input
+                type="text"
+                id="signature-input"
+                class="w-full p-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="您的署名"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div class="card p-6 rounded-xl">
+          <h2 class="text-xl font-bold mb-4">样式选择</h2>
+          <div class="space-y-4">
+            <div>
+              <label class="block text-sm font-medium mb-1">主题</label>
+              <select
+                id="theme-select"
+                class="w-full p-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="light">明亮主题</option>
+                <option value="dark">暗黑主题</option>
+                <option value="warm">温暖主题</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium mb-1">中文字体</label>
+              <select
+                id="zh-font-select"
+                class="w-full p-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="'Noto Serif SC', serif">
+                  思源宋体 (Noto Serif SC)
+                </option>
+                <option value="'Noto Sans SC', sans-serif">
+                  思源黑体 (Noto Sans SC)
+                </option>
+                <option value="'ZCOOL XiaoWei', serif">
+                  站酷小薇 (ZCOOL XiaoWei)
+                </option>
+                <option value="'Ma Shan Zheng', cursive">
+                  马善政楷体 (Ma Shan Zheng)
+                </option>
+                <option value="'ZCOOL QingKe HuangYou', cursive">
+                  站酷庆科黄油体 (ZCOOL QingKe HuangYou)
+                </option>
+              </select>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium mb-1">英文字体</label>
+              <select
+                id="en-font-select"
+                class="w-full p-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="'Courier Prime', monospace">
+                  Courier Prime 等宽
+                </option>
+                <option value="'Roboto Mono', monospace">
+                  Roboto Mono 等宽
+                </option>
+                <option value="'Source Code Pro', monospace">
+                  Source Code Pro 等宽
+                </option>
+                <option value="'Lora', serif">Lora 衬线</option>
+                <option value="'Playfair Display', serif">
+                  Playfair Display 衬线
+                </option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 预览区域 -->
+      <div class="preview-panel flex flex-col">
+        <div class="card p-6 rounded-xl w-full mb-6">
+          <div id="preview-container" class="card-container">
+            <div id="card-preview" class="content-wrapper rounded-lg">
+              <div id="content-preview" class="mb-4 text-lg"></div>
+              <div>
+                <div
+                  id="signature-preview"
+                  class="text-right italic opacity-75"
+                ></div>
+                <div
+                  id="date-display"
+                  class="text-right text-sm opacity-50 mt-1"
+                ></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 导出卡片部分移到这里 -->
+        <div class="card p-6 rounded-xl w-full">
+          <h2 class="text-xl font-bold mb-4">导出卡片</h2>
+          <div class="flex space-x-4">
+            <button
+              id="download-btn"
+              class="flex-1 py-2 bg-blue-500 text-white rounded-lg transition hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-700"
+            >
+              下载图片
+            </button>
+            <button
+              id="copy-btn"
+              class="flex-1 py-2 bg-gray-200 text-gray-800 rounded-lg transition hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400"
+            >
+              复制到剪贴板
+            </button>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <footer class="mt-12 text-center text-sm opacity-50">
+      <p>
+        笔记卡片生成器 &copy; 2025 | 使用 HTML5, Tailwind CSS 和 JavaScript 构建
+      </p>
+    </footer>
+
+    <script>
+      // 工具函数
+      const $ = (selector) => document.querySelector(selector);
+
+      // 获取DOM元素
+      const contentInput = $("#content-input");
+      const signatureInput = $("#signature-input");
+      const themeSelect = $("#theme-select");
+      const zhFontSelect = $("#zh-font-select");
+      const enFontSelect = $("#en-font-select");
+      const downloadBtn = $("#download-btn");
+      const copyBtn = $("#copy-btn");
+      const contentPreview = $("#content-preview");
+      const signaturePreview = $("#signature-preview");
+      const dateDisplay = $("#date-display");
+      const cardPreview = $("#card-preview");
+      const previewContainer = $("#preview-container");
+
+      // 初始化日期显示
+      const updateDate = () => {
+        const now = new Date();
+        const options = { year: "numeric", month: "long", day: "numeric" };
+        dateDisplay.textContent = now.toLocaleDateString("zh-CN", options);
+      };
+      updateDate();
+
+      // 检测语言类型 (简单判断)
+      const detectLanguage = (text) => {
+        // 检查是否包含中文字符
+        const hasChineseChar = /[\u4e00-\u9fa5]/.test(text);
+        // 检查是否包含英文字符
+        const hasEnglishChar = /[a-zA-Z]/.test(text);
+
+        if (hasChineseChar && hasEnglishChar) return "mixed";
+        if (hasChineseChar) return "zh";
+        return "en";
+      };
+
+      // 更新预览
+      const updatePreview = () => {
+        const content = contentInput.value;
+        const signature = signatureInput.value;
+
+        // 处理内容，按段落分割并应用适当字体
+        if (content.trim()) {
+          const paragraphs = content.split("\n").filter((p) => p.trim());
+          contentPreview.innerHTML = paragraphs
+            .map((p) => {
+              const lang = detectLanguage(p);
+              const className = lang === "en" ? "en-text" : "zh-text";
+              return `<p class="${className} mb-3">${p}</p>`;
+            })
+            .join("");
+        } else {
+          contentPreview.innerHTML =
+            '<p class="opacity-50 italic">内容预览区域</p>';
+        }
+
+        // 处理署名
+        if (signature.trim()) {
+          const sigLang = detectLanguage(signature);
+          const sigClassName = sigLang === "en" ? "en-text" : "zh-text";
+          signaturePreview.innerHTML = `<span class="${sigClassName}">— ${signature}</span>`;
+        } else {
+          signaturePreview.innerHTML = "";
+        }
+
+        // 更新字体
+        document.querySelectorAll(".zh-text").forEach((el) => {
+          el.style.fontFamily = zhFontSelect.value;
+        });
+
+        document.querySelectorAll(".en-text").forEach((el) => {
+          el.style.fontFamily = enFontSelect.value;
+        });
+
+        // 调整卡片高度以适应内容
+        adjustCardHeight();
+      };
+
+      // 自适应卡片高度
+      const adjustCardHeight = () => {
+        // 让卡片高度完全自适应内容
+        cardPreview.style.minHeight = "";
+        cardPreview.style.height = "auto";
+
+        // 确保内容为空时也有合适的展示空间
+        if (!contentInput.value.trim()) {
+          contentPreview.style.minHeight = "40px";
+        } else {
+          contentPreview.style.minHeight = "";
+        }
+
+        // 调整预览区域的最小宽度，确保在空白时也有合适的宽度
+        if (!contentInput.value.trim()) {
+          cardPreview.style.minWidth = "320px";
+        } else {
+          cardPreview.style.minWidth = "";
+        }
+      };
+
+      // 更新主题
+      const updateTheme = () => {
+        const theme = themeSelect.value;
+        // 移除所有主题相关的类，但保留其他布局类
+        document.body.classList.remove(
+          "theme-light",
+          "theme-dark",
+          "theme-warm"
+        );
+        // 添加新的主题类
+        document.body.classList.add(`theme-${theme}`);
+
+        // 更新输入框和选择框的样式
+        updateInputStyles();
+      };
+
+      // 更新输入框和选择框样式
+      const updateInputStyles = () => {
+        const inputs = document.querySelectorAll("input, textarea, select");
+        inputs.forEach((input) => {
+          // 刷新输入框样式以应用新主题
+          input.style.backgroundColor = getComputedStyle(
+            document.body
+          ).getPropertyValue("--input-bg");
+          input.style.color = getComputedStyle(document.body).getPropertyValue(
+            "--input-text"
+          );
+          input.style.borderColor = getComputedStyle(
+            document.body
+          ).getPropertyValue("--input-border");
+        });
+      };
+
+      // 导出为图片
+      const exportToImage = () => {
+        // 创建一个临时容器来包裹卡片，以便设置正确的背景色和效果
+        const tempContainer = document.createElement("div");
+        tempContainer.style.position = "fixed";
+        tempContainer.style.left = "-9999px";
+        tempContainer.style.top = "0";
+        tempContainer.style.padding = "20px";
+
+        // 创建一个背景容器，模拟浮动背景效果
+        const bgContainer = document.createElement("div");
+        bgContainer.style.position = "relative";
+        bgContainer.style.overflow = "hidden";
+        bgContainer.style.borderRadius = "0.75rem";
+        bgContainer.style.padding = "20px";
+
+        // 添加简化的背景效果
+        const accentColor = getComputedStyle(document.body).getPropertyValue(
+          "--accent-color"
+        );
+        bgContainer.style.background = `linear-gradient(135deg, ${accentColor}22, transparent 80%)`;
+
+        // 设置卡片容器样式
+        const cardContainer = document.createElement("div");
+        cardContainer.style.backgroundColor = getComputedStyle(
+          document.body
+        ).getPropertyValue("--bg-card");
+        cardContainer.style.borderRadius = "0.75rem";
+        cardContainer.style.boxShadow =
+          "0 8px 30px " +
+          getComputedStyle(document.body).getPropertyValue("--shadow-color");
+        cardContainer.style.overflow = "hidden";
+
+        // 克隆卡片预览元素
+        const clonedCard = cardPreview.cloneNode(true);
+        cardContainer.appendChild(clonedCard);
+        bgContainer.appendChild(cardContainer);
+        tempContainer.appendChild(bgContainer);
+        document.body.appendChild(tempContainer);
+
+        // 设置临时容器的尺寸
+        const width = cardPreview.offsetWidth + 40; // 添加内边距
+        const height = cardPreview.offsetHeight + 40;
+        bgContainer.style.width = width + "px";
+        bgContainer.style.height = height + "px";
+        cardContainer.style.width = cardPreview.offsetWidth + "px";
+
+        html2canvas(bgContainer, {
+          backgroundColor: null, // 透明背景
+          scale: 2, // 提高导出质量
+          logging: false,
+          allowTaint: true,
+          useCORS: true,
+        }).then((canvas) => {
+          // 导出图片
+          const link = document.createElement("a");
+          link.download = `笔记卡片_${new Date().getTime()}.png`;
+          link.href = canvas.toDataURL("image/png");
+          link.click();
+
+          // 移除临时容器
+          document.body.removeChild(tempContainer);
+        });
+      };
+
+      // 复制到剪贴板
+      const copyToClipboard = () => {
+        // 创建一个临时容器来包裹卡片，以便设置正确的背景色和效果
+        const tempContainer = document.createElement("div");
+        tempContainer.style.position = "fixed";
+        tempContainer.style.left = "-9999px";
+        tempContainer.style.top = "0";
+        tempContainer.style.padding = "20px";
+
+        // 创建一个背景容器，模拟浮动背景效果
+        const bgContainer = document.createElement("div");
+        bgContainer.style.position = "relative";
+        bgContainer.style.overflow = "hidden";
+        bgContainer.style.borderRadius = "0.75rem";
+        bgContainer.style.padding = "20px";
+
+        // 添加简化的背景效果
+        const accentColor = getComputedStyle(document.body).getPropertyValue(
+          "--accent-color"
+        );
+        bgContainer.style.background = `linear-gradient(135deg, ${accentColor}22, transparent 80%)`;
+
+        // 设置卡片容器样式
+        const cardContainer = document.createElement("div");
+        cardContainer.style.backgroundColor = getComputedStyle(
+          document.body
+        ).getPropertyValue("--bg-card");
+        cardContainer.style.borderRadius = "0.75rem";
+        cardContainer.style.boxShadow =
+          "0 8px 30px " +
+          getComputedStyle(document.body).getPropertyValue("--shadow-color");
+        cardContainer.style.overflow = "hidden";
+
+        // 克隆卡片预览元素
+        const clonedCard = cardPreview.cloneNode(true);
+        cardContainer.appendChild(clonedCard);
+        bgContainer.appendChild(cardContainer);
+        tempContainer.appendChild(bgContainer);
+        document.body.appendChild(tempContainer);
+
+        // 设置临时容器的尺寸
+        const width = cardPreview.offsetWidth + 40; // 添加内边距
+        const height = cardPreview.offsetHeight + 40;
+        bgContainer.style.width = width + "px";
+        bgContainer.style.height = height + "px";
+        cardContainer.style.width = cardPreview.offsetWidth + "px";
+
+        html2canvas(bgContainer, {
+          backgroundColor: null, // 透明背景
+          scale: 2, // 提高导出质量
+          logging: false,
+          allowTaint: true,
+          useCORS: true,
+        }).then((canvas) => {
+          canvas.toBlob((blob) => {
+            try {
+              // 现代浏览器API
+              navigator.clipboard
+                .write([new ClipboardItem({ "image/png": blob })])
+                .then(() => {
+                  alert("已复制到剪贴板！");
+                })
+                .catch((err) => {
+                  console.error("复制失败:", err);
+                  alert("复制失败，请尝试下载图片。");
+                });
+            } catch (e) {
+              alert("您的浏览器不支持剪贴板API，请尝试下载图片。");
+            }
+
+            // 移除临时容器
+            document.body.removeChild(tempContainer);
+          });
+        });
+      };
+
+      // 事件监听
+      contentInput.addEventListener("input", updatePreview);
+      signatureInput.addEventListener("input", updatePreview);
+      themeSelect.addEventListener("change", () => {
+        updateTheme();
+        updatePreview();
+      });
+      zhFontSelect.addEventListener("change", updatePreview);
+      enFontSelect.addEventListener("change", updatePreview);
+      downloadBtn.addEventListener("click", exportToImage);
+      copyBtn.addEventListener("click", copyToClipboard);
+
+      // 窗口大小变化时重新调整
+      window.addEventListener("resize", adjustCardHeight);
+
+      // 初始化页面
+      updateTheme();
+      updatePreview();
+      updateInputStyles(); // 初始化时应用输入框样式
+    </script>
+  </body>
+</html>
