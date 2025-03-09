@@ -17,21 +17,27 @@ chrome.runtime.onInstalled.addListener(async () => {
 });
 
 // 处理下载请求
-chrome.runtime.onMessage.addListener((message, sender) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'downloadTorrent') {
-    handleDownload(message.url, sender.tab?.id, message.filename);
-    return true;
+    handleDownload(message.url, sender.tab?.id, message.filename, message.saveAs)
+      .then(() => {
+        sendResponse({ success: true });
+      })
+      .catch((error) => {
+        sendResponse({ success: false, error: error.message });
+      });
+    return true; // 表示将异步发送响应
   }
 });
 
 // 下载处理函数
-async function handleDownload(url: string, tabId?: number, filename?: string) {
+async function handleDownload(url: string, tabId?: number, filename?: string, saveAs?: boolean) {
   try {
     // 使用 chrome.downloads API 下载文件，并显示保存对话框
     const downloadId = await chrome.downloads.download({
       url: url,
       filename: filename || `rutracker-${new Date().getTime()}.torrent`,
-      saveAs: true // 显示"另存为"对话框，让用户选择保存位置
+      saveAs: saveAs // 使用传入的 saveAs 参数
     });
 
     // 监听下载状态变化

@@ -16,23 +16,43 @@ let downloadProgress = {
   isDownloading: false
 };
 
-// 监听来自弹出窗口的消息
-chrome.runtime.onMessage.addListener((message: Message) => {
+// 修改消息监听器
+chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) => {
+  // 创建一个处理消息的异步函数
+  const handleMessage = async () => {
+    try {
   if (message.action === 'scan') {
-    scanPage();
-  } else if (message.action === 'download' && message.url) {
-    downloadTorrent(message.url);
-  } else if (message.action === 'batchDownload' && message.urls) {
-    handleBatchDownload(message.urls);
-  } else if (message.action === 'goToNextPage') {
-    goToNextPage();
-  } else if (message.action === 'injectToolbar') {
-    injectToolbar();
-  } else if (message.action === 'downloadStatus') {
-    if (message.status) {
-      handleDownloadStatus(message.status, message.error);
+        await scanPage();
+        sendResponse({ success: true });
+      } else if (message.action === 'download' && message.url) {
+        await downloadTorrent(message.url);
+        sendResponse({ success: true });
+      } else if (message.action === 'batchDownload') {
+        await handleBatchDownload();
+        sendResponse({ success: true });
+      } else if (message.action === 'goToNextPage') {
+        goToNextPage();
+        sendResponse({ success: true });
+      } else if (message.action === 'injectToolbar') {
+        injectToolbar();
+        sendResponse({ success: true });
+      } else if (message.action === 'downloadStatus') {
+        if (message.status) {
+          handleDownloadStatus(message.status, message.error);
+          sendResponse({ success: true });
+        }
+      }
+    } catch (error) {
+      console.error('Error handling message:', error);
+      sendResponse({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
     }
-  }
+  };
+
+  // 立即执行异步处理函数
+  handleMessage();
+
+  // 返回 true 表示将异步发送响应
+  return true;
 });
 
 // 扫描页面上的种子链接
@@ -41,9 +61,10 @@ function scanPage() {
   const torrents: TorrentItem[] = [];
 
   torrentDivs.forEach((div) => {
-    // 检查是否包含 t-icon-attach 图标，如果包含则跳过
+    // 检查是否包含 t-icon-attach 图标或 tor-consumed 标签，如果包含则跳过
     const hasAttachIcon = div.querySelector('img.t-icon-attach');
-    if (hasAttachIcon) return;
+    const hasConsumedIcon = div.querySelector('span.tor-icon.tor-consumed');
+    if (hasAttachIcon || hasConsumedIcon) return;
 
     // 获取主题链接
     const link = div.querySelector('a.torTopic.bold, a.tt-text, a.gen.tt-text');
@@ -106,19 +127,71 @@ function scanPage() {
   });
 }
 
-// 修改下载函数
-async function downloadTorrent(url: string, title?: string) {
+// 添加文件名清理函数
+function sanitizeFilename(filename: string): string {
+  // 1. 替换特殊字符和格式化符号
+  let sanitized = filename
+    // 替换音乐相关的特殊字符为对应的安全字符
+    .replace(/[\/\\:*?"<>|]/g, '-')  // 基本的非法字符替换
+    .replace(/\s*[\/\\]\s*/g, '-')   // 斜杠替换为连字符
+    .replace(/\s*\|\s*/g, '-')       // 竖线替换为连字符
+    .replace(/\s*:\s*/g, ' - ')      // 冒号替换为连字符
+    .replace(/\s*[&＆]\s*/g, ' and ') // &符号替换为 and
+    .replace(/[\x00-\x1f\x80-\x9f]/g, '') // 移除控制字符
+    .replace(/\.+$/, '')             // 移除末尾的点
+    .replace(/^\.+/, '')             // 移除开头的点
+    .replace(/\s+/g, ' ')            // 多个空格替换为单个空格
+    .trim();
+
+  // 2. 处理括号和特殊格式
+  sanitized = sanitized
+    .replace(/[\(\[\{](\d+)[\)\]\}]/g, '($1)') // 统一数字的括号格式
+    .replace(/\s*-\s*/g, ' - ')      // 统一连字符格式
+    .replace(/\s+/g, ' ')            // 再次清理多余空格
+    .trim();
+
+  // 3. 处理音乐相关的特殊标记
+  sanitized = sanitized
+    .replace(/\b(MP3|FLAC|WAV|VBR|CBR)\b/gi, x => x.toUpperCase())  // 统一音频格式大写
+    .replace(/\b(kbps|Kbps|KBPS)\b/g, 'kbps')                       // 统一码率单位
+    .replace(/\s*~\s*/g, ' ');                                      // 处理约等于符号
+
+  // 4. 处理文件名长度 (Windows 最大 255 字符)
+  const ext = '.torrent';
+  const maxLength = 255 - ext.length;
+  if (sanitized.length > maxLength) {
+    // 智能截断：尽量在单词边界处截断
+    const truncated = sanitized.slice(0, maxLength).replace(/\s+\S*$/, '');
+    sanitized = truncated || sanitized.slice(0, maxLength); // 如果没有找到合适的单词边界，就直接截断
+  }
+
+  // 5. 处理 Windows 保留文件名
+  const reservedNames = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/i;
+  if (reservedNames.test(sanitized)) {
+    sanitized = `_${sanitized}`;
+  }
+
+  // 6. 确保文件名不为空
+  if (!sanitized) {
+    sanitized = 'unnamed_torrent';
+  }
+
+  // 7. 添加扩展名
+  return `${sanitized}${ext}`;
+}
+
+// 修改下载函数，确保返回 Promise
+async function downloadTorrent(url: string, title?: string): Promise<void> {
   try {
-    // 检查登录状态 - 使用多个指标
+    // 检查登录状态
     const loginIndicators = [
-      document.querySelector('a.logged-in-username'),           // 用户名链接
-      document.querySelector('a[href*="logout="]'),            // 登出链接
-      document.querySelector('.topmenu a[href*="profile.php"]') // 个人资料链接
+      document.querySelector('a.logged-in-username'),
+      document.querySelector('a[href*="logout="]'),
+      document.querySelector('.topmenu a[href*="profile.php"]')
     ];
     
     const isLoggedIn = loginIndicators.some(indicator => indicator !== null);
     if (!isLoggedIn) {
-      // 获取登录页面链接
       const loginUrl = 'https://rutracker.org/forum/login.php';
       if (confirm('You need to login to RuTracker first. Would you like to open the login page?')) {
         window.open(loginUrl, '_blank');
@@ -126,84 +199,156 @@ async function downloadTorrent(url: string, title?: string) {
       throw new Error('Please login to RuTracker first');
     }
 
+    // 获取保存位置设置
+    const { askSaveLocation } = await chrome.storage.sync.get(['askSaveLocation']);
+
+    // 处理文件名
+    const filename = title ? sanitizeFilename(`${title}.torrent`) : `torrent-${Date.now()}.torrent`;
+
     // 发送消息给 background script 处理下载
-    await chrome.runtime.sendMessage({
-      action: 'downloadTorrent',
-      url: url,
-      filename: title ? `${title.replace(/[<>:"/\\|?*]/g, '_')}.torrent` : undefined
+    return new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({
+        action: 'downloadTorrent',
+        url: url,
+        filename: filename,
+        saveAs: askSaveLocation
+      }, (response: { success: boolean; error?: string }) => {
+        if (chrome.runtime.lastError) {
+          reject(chrome.runtime.lastError);
+        } else if (!response.success) {
+          reject(new Error(response.error || 'Download failed'));
+        } else {
+          resolve();
+        }
+      });
     });
   } catch (error) {
     console.error('Failed to download torrent:', error);
     handleDownloadStatus('error', error instanceof Error ? error.message : 'Failed to download torrent');
+    throw error;
+  }
+}
+
+// 修改 handleDownloadAndPreview 函数
+async function handleDownloadAndPreview(torrent: { id: string, url: string, downloadUrl: string, title: string }) {
+  try {
+    // 1. 先下载种子
+    await downloadTorrent(torrent.downloadUrl, torrent.title);
+
+    // 2. 在新标签页中打开预览
+    const previewTab = await chrome.tabs.create({ 
+      url: torrent.url,
+      active: false // 在后台打开
+    });
+
+    // 3. 等待页面加载完成后关闭
+    if (previewTab.id) {
+      const listener = (tabId: number, info: chrome.tabs.TabChangeInfo) => {
+        if (tabId === previewTab.id && info.status === 'complete') {
+          // 等待一小段时间后关闭标签页
+          setTimeout(() => {
+            chrome.tabs.remove(tabId);
+            chrome.tabs.onUpdated.removeListener(listener);
+          }, 2000); // 等待2秒后关闭
+        }
+      };
+      chrome.tabs.onUpdated.addListener(listener);
+    }
+  } catch (error) {
+    console.error('Failed to download and preview torrent:', error);
+    throw error;
   }
 }
 
 // 修改批量下载处理函数
-async function handleBatchDownload(urls: string[]) {
+async function handleBatchDownload() {
   const downloadButton = document.getElementById('batch-download');
   const progressBar = document.querySelector('#rutracker-helper-toolbar .download-progress') as HTMLElement;
   const progressBarInner = document.querySelector('#rutracker-helper-toolbar .progress-bar') as HTMLElement;
   
   if (!downloadButton || !progressBar || !progressBarInner) return;
 
-  // 检查登录状态 - 使用多个指标
-  const loginIndicators = [
-    document.querySelector('a.logged-in-username'),           // 用户名链接
-    document.querySelector('a[href*="logout="]'),            // 登出链接
-    document.querySelector('.topmenu a[href*="profile.php"]') // 个人资料链接
-  ];
-  
-  const isLoggedIn = loginIndicators.some(indicator => indicator !== null);
-  if (!isLoggedIn) {
-    const loginUrl = 'https://rutracker.org/forum/login.php';
-    if (confirm('You need to login to RuTracker first. Would you like to open the login page?')) {
-      window.open(loginUrl, '_blank');
-    }
+  // 获取所有选中的种子信息
+  const selectedTorrents = Array.from(document.querySelectorAll('div.torTopic'))
+    .filter(div => !div.querySelector('span.tor-icon.tor-consumed')) // 过滤掉已消费的种子
+    .map(div => {
+      const link = div.querySelector('a.torTopic.bold, a.tt-text, a.gen.tt-text');
+      const id = link?.getAttribute('href')?.match(/t=(\d+)/)?.[1];
+      const url = link?.getAttribute('href');
+      const title = link?.textContent?.trim();
+      const checkbox = div.querySelector('input[type="checkbox"]') as HTMLInputElement;
+      
+      if (!id || !url || !title || !checkbox.checked) return null;
+
+      return {
+        id,
+        title,
+        url: url.startsWith('http') ? url : `https://rutracker.org/forum/${url}`,
+        downloadUrl: `https://rutracker.org/forum/dl.php?t=${id}`
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+
+  if (selectedTorrents.length === 0) {
+    alert('Please select at least one torrent to download');
     return;
   }
 
   downloadProgress = {
     current: 0,
-    total: urls.length,
+    total: selectedTorrents.length,
     isDownloading: true
   };
 
+  // 更新UI状态
   downloadButton.setAttribute('disabled', 'true');
   downloadButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-  downloadButton.setAttribute('data-tooltip', `Downloading 0/${urls.length}`);
+  downloadButton.setAttribute('data-tooltip', `Downloading 0/${selectedTorrents.length}`);
   progressBar.style.display = 'block';
   progressBarInner.style.width = '0%';
 
-  // 获取所有选中的种子信息
-  const selectedTorrents = Array.from(document.querySelectorAll('div.torTopic')).map(div => {
-    const link = div.querySelector('a.torTopic.bold, a.tt-text, a.gen.tt-text');
-    const id = link?.getAttribute('href')?.match(/t=(\d+)/)?.[1];
-    const title = link?.textContent?.trim() || 'Unknown Title';
-    return { id, title };
-  }).filter(({ id }) => urls.includes(`https://rutracker.org/forum/dl.php?t=${id}`));
-
   let hasError = false;
+  let completedCount = 0;
 
-  for (const torrent of selectedTorrents) {
-    try {
-      const url = `https://rutracker.org/forum/dl.php?t=${torrent.id}`;
-      await downloadTorrent(url, torrent.title);
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    } catch (error) {
-      console.error('Failed to download torrent:', error);
-      hasError = true;
+  try {
+    // 依次处理每个选中的种子
+    for (const torrent of selectedTorrents) {
+      try {
+        await handleDownloadAndPreview(torrent);
+        
+        // 更新进度
+        completedCount++;
+        const progress = (completedCount / selectedTorrents.length) * 100;
+        progressBarInner.style.width = `${progress}%`;
+        downloadButton.setAttribute('data-tooltip', `Downloading ${completedCount}/${selectedTorrents.length}`);
+        
+        // 添加延迟以避免过快打开太多标签
+        if (completedCount < selectedTorrents.length) {
+          await new Promise(resolve => setTimeout(resolve, 1500));
+        }
+      } catch (error) {
+        console.error(`Failed to download torrent ${torrent.title}:`, error);
+        hasError = true;
+      }
+    }
+  } catch (error) {
+    console.error('Batch download failed:', error);
+    hasError = true;
+  } finally {
+    // 恢复按钮状态
+    downloadProgress.isDownloading = false;
+    downloadButton.innerHTML = '<i class="fas fa-download"></i>';
+    downloadButton.removeAttribute('disabled');
+    downloadButton.setAttribute('data-tooltip', 'Download Selected');
+    progressBar.style.display = 'none';
+
+    if (hasError) {
+      alert('Some downloads failed. Please try again.');
+    } else if (completedCount === selectedTorrents.length) {
+      // 所有下载成功完成
+      downloadButton.setAttribute('data-tooltip', `Successfully downloaded ${completedCount} torrents`);
     }
   }
-
-  if (hasError) {
-    alert('Some downloads failed. Please try again.');
-  }
-
-  // 恢复按钮状态
-  downloadButton.innerHTML = '<i class="fas fa-download"></i>';
-  downloadButton.removeAttribute('disabled');
-  downloadButton.setAttribute('data-tooltip', 'Download Selected');
-  progressBar.style.display = 'none';
 }
 
 // 添加跳转到下一页的函数
@@ -393,6 +538,57 @@ function injectToolbar() {
       #rutracker-helper-toolbar button.single-download:hover:not([disabled]) {
         background: rgba(72, 187, 120, 0.9);
       }
+      #rutracker-helper-toolbar .settings-group {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 0;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        margin-top: 4px;
+      }
+      #rutracker-helper-toolbar .toggle-switch {
+        position: relative;
+        display: inline-block;
+        width: 36px;
+        height: 20px;
+      }
+      #rutracker-helper-toolbar .toggle-switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+      #rutracker-helper-toolbar .toggle-slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: rgba(74, 85, 104, 0.8);
+        transition: .4s;
+        border-radius: 20px;
+      }
+      #rutracker-helper-toolbar .toggle-slider:before {
+        position: absolute;
+        content: "";
+        height: 16px;
+        width: 16px;
+        left: 2px;
+        bottom: 2px;
+        background-color: white;
+        transition: .4s;
+        border-radius: 50%;
+      }
+      #rutracker-helper-toolbar .toggle-switch input:checked + .toggle-slider {
+        background-color: rgba(72, 187, 120, 0.8);
+      }
+      #rutracker-helper-toolbar .toggle-switch input:checked + .toggle-slider:before {
+        transform: translateX(16px);
+      }
+      #rutracker-helper-toolbar .setting-label {
+        color: rgba(255, 255, 255, 0.9);
+        font-size: 12px;
+      }
     </style>
     <div class="toolbar-header">
       <span class="toolbar-title">RuTracker Helper</span>
@@ -412,6 +608,9 @@ function injectToolbar() {
       <button id="apply-days-filter" data-tooltip="Apply Filter">
         <i class="fas fa-filter"></i>
       </button>
+      <button id="next-page" data-tooltip="Next Page">
+        <i class="fas fa-arrow-right"></i>
+      </button>
     </div>
     <div class="toolbar-group">
       <button id="toggle-read-status" data-tooltip="Select Unread">
@@ -427,6 +626,13 @@ function injectToolbar() {
     <div class="download-progress">
       <div class="progress-bar" style="width: 0%"></div>
     </div>
+    <div class="settings-group">
+      <label class="setting-label">Ask save location</label>
+      <label class="toggle-switch">
+        <input type="checkbox" id="ask-save-location">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
   `;
 
   document.body.appendChild(toolbar);
@@ -439,6 +645,10 @@ function setupToolbarHandlers() {
 
   // 为每个种子主题添加复选框
   document.querySelectorAll('div.torTopic').forEach(div => {
+    // 检查是否包含 tor-consumed 标签，如果包含则跳过
+    const hasConsumedIcon = div.querySelector('span.tor-icon.tor-consumed');
+    if (hasConsumedIcon) return;
+
     const link = div.querySelector('a.torTopic.bold, a.tt-text, a.gen.tt-text');
     if (!link) return;
 
@@ -481,8 +691,39 @@ function setupToolbarHandlers() {
       const title = link.textContent?.trim() || 'Unknown Title';
       await downloadTorrent(url, title);
     });
+
+    // 创建单个预览按钮
+    const singlePreviewBtn = document.createElement('button');
+    singlePreviewBtn.className = 'single-preview';
+    singlePreviewBtn.setAttribute('data-tooltip', 'Preview this topic');
+    singlePreviewBtn.innerHTML = '<i class="fas fa-eye"></i>';
+    singlePreviewBtn.style.cssText = `
+      width: 24px;
+      height: 24px;
+      padding: 4px;
+      margin-left: 4px;
+      background: rgba(66, 153, 225, 0.8);
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      vertical-align: middle;
+      transition: all 0.2s ease;
+    `;
+    singlePreviewBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const url = link.getAttribute('href');
+      if (url) {
+        window.open(url.startsWith('http') ? url : `https://rutracker.org/forum/${url}`, '_blank');
+      }
+    });
     
     checkboxes.set(id, checkbox);
+    div.insertBefore(singlePreviewBtn, div.firstChild);
     div.insertBefore(singleDownloadBtn, div.firstChild);
     div.insertBefore(checkbox, div.firstChild);
   });
@@ -525,8 +766,11 @@ function setupToolbarHandlers() {
     updateSelectedCount();
   });
 
-  // 选择未读/已读
-  document.getElementById('toggle-read-status')?.addEventListener('click', () => {
+  // 修改选择未读/已读按钮的处理逻辑
+  const toggleReadStatusButton = document.getElementById('toggle-read-status');
+  let isSelectingUnread = true; // 添加状态变量
+
+  toggleReadStatusButton?.addEventListener('click', () => {
     document.querySelectorAll('div.torTopic').forEach(div => {
       const id = div.querySelector('a')?.getAttribute('href')?.match(/t=(\d+)/)?.[1];
       if (!id) return;
@@ -534,9 +778,22 @@ function setupToolbarHandlers() {
       const isUnread = div.innerHTML.includes('class="t-is-unread"');
       const checkbox = checkboxes.get(id);
       if (checkbox) {
-        checkbox.checked = !isUnread;
+        checkbox.checked = isSelectingUnread ? isUnread : !isUnread;
       }
     });
+    
+    // 更新按钮文本和状态
+    if (toggleReadStatusButton) {
+      if (isSelectingUnread) {
+        toggleReadStatusButton.textContent = 'Select Read';
+        toggleReadStatusButton.setAttribute('data-tooltip', 'Select Read Topics');
+      } else {
+        toggleReadStatusButton.textContent = 'Select Unread';
+        toggleReadStatusButton.setAttribute('data-tooltip', 'Select Unread Topics');
+      }
+      isSelectingUnread = !isSelectingUnread;
+    }
+    
     updateSelectedCount();
   });
 
@@ -544,7 +801,20 @@ function setupToolbarHandlers() {
   document.getElementById('batch-download')?.addEventListener('click', async () => {
     const selectedIds = Array.from(checkboxes.entries())
       .filter(([_, cb]) => cb.checked)
-      .map(([id]) => id);
+      .map(([id]) => {
+        // 修改获取标题的逻辑，确保能正确获取到对应的标题
+        const div = document.querySelector(`input[data-torrent-id="${id}"]`)?.closest('div.torTopic');
+        const link = div?.querySelector('a.torTopic.bold, a.tt-text, a.gen.tt-text');
+        const title = link?.textContent?.trim();
+        
+        // 添加调试日志
+        console.log('Selected torrent:', { id, title, div, link });
+        
+        return {
+          id,
+          title: title || `torrent-${id}` // 如果无法获取标题，使用 ID 作为后备
+        };
+      });
 
     if (selectedIds.length === 0) {
       alert('Please select at least one torrent to download');
@@ -552,35 +822,68 @@ function setupToolbarHandlers() {
     }
 
     const downloadButton = document.getElementById('batch-download');
-    if (downloadButton) {
-      downloadButton.textContent = `Downloading (0/${selectedIds.length})...`;
-      downloadButton.setAttribute('disabled', 'true');
-    }
+    const progressBar = document.querySelector('#rutracker-helper-toolbar .download-progress') as HTMLElement;
+    const progressBarInner = document.querySelector('#rutracker-helper-toolbar .progress-bar') as HTMLElement;
+
+    if (!downloadButton || !progressBar || !progressBarInner) return;
+
+    downloadProgress = {
+      current: 0,
+      total: selectedIds.length,
+      isDownloading: true
+    };
+
+    // 更新UI状态
+    downloadButton.setAttribute('disabled', 'true');
+    downloadButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    downloadButton.setAttribute('data-tooltip', `Downloading 0/${selectedIds.length}`);
+    progressBar.style.display = 'block';
+    progressBarInner.style.width = '0%';
+
+    let hasError = false;
+    let completedCount = 0;
 
     try {
-      for (let i = 0; i < selectedIds.length; i++) {
-        const id = selectedIds[i];
-        const url = `https://rutracker.org/forum/dl.php?t=${id}`;
-        await downloadTorrent(url);
-
-        // 更新下载进度
-        if (downloadButton) {
-          downloadButton.textContent = `Downloading (${i + 1}/${selectedIds.length})...`;
-        }
-
-        // 添加延迟以避免过快下载
-        if (i < selectedIds.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
+      // 串行下载，确保每个文件都能正确下载
+      for (const torrent of selectedIds) {
+        try {
+          const url = `https://rutracker.org/forum/dl.php?t=${torrent.id}`;
+          
+          // 确保使用正确的标题作为文件名
+          console.log('Downloading torrent:', { id: torrent.id, title: torrent.title });
+          await downloadTorrent(url, torrent.title);
+          
+          // 更新进度
+          completedCount++;
+          const progress = (completedCount / selectedIds.length) * 100;
+          progressBarInner.style.width = `${progress}%`;
+          downloadButton.setAttribute('data-tooltip', `Downloading ${completedCount}/${selectedIds.length}`);
+          
+          // 添加延迟以避免服务器限制
+          if (completedCount < selectedIds.length) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+        } catch (error) {
+          console.error(`Failed to download torrent ${torrent.title}:`, error);
+          hasError = true;
         }
       }
     } catch (error) {
-      console.error('Failed to batch download torrents:', error);
-      alert('Some downloads failed. Please try again.');
+      console.error('Batch download failed:', error);
+      hasError = true;
     } finally {
       // 恢复按钮状态
-      if (downloadButton) {
-        downloadButton.textContent = 'Download Selected';
-        downloadButton.removeAttribute('disabled');
+      downloadProgress.isDownloading = false;
+      downloadButton.innerHTML = '<i class="fas fa-download"></i>';
+      downloadButton.removeAttribute('disabled');
+      downloadButton.setAttribute('data-tooltip', 'Download Selected');
+      progressBar.style.display = 'none';
+
+      if (hasError) {
+        alert('Some downloads failed. Please try again.');
+      } else if (completedCount === selectedIds.length) {
+        // 所有下载成功完成
+        downloadButton.setAttribute('data-tooltip', `Successfully downloaded ${completedCount} torrents`);
       }
     }
   });
@@ -615,6 +918,25 @@ function setupToolbarHandlers() {
         toggleSelectButton.textContent = allChecked ? 'Deselect All' : 'Select All';
       }
     });
+  });
+
+  // 读取并设置开关状态
+  chrome.storage.sync.get(['askSaveLocation'], (result) => {
+    const askSaveLocationToggle = document.getElementById('ask-save-location') as HTMLInputElement;
+    if (askSaveLocationToggle) {
+      askSaveLocationToggle.checked = result.askSaveLocation ?? false;
+    }
+  });
+
+  // 监听开关变化
+  document.getElementById('ask-save-location')?.addEventListener('change', (e) => {
+    const checked = (e.target as HTMLInputElement).checked;
+    chrome.storage.sync.set({ askSaveLocation: checked });
+  });
+
+  // 下一页按钮
+  document.getElementById('next-page')?.addEventListener('click', () => {
+    goToNextPage();
   });
 }
 
