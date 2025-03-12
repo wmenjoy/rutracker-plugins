@@ -722,7 +722,44 @@ function setupToolbarHandlers() {
       }
     });
     
+    // 创建单个搜索按钮
+    const singleSearchBtn = document.createElement('button');
+    singleSearchBtn.className = 'single-search';
+    singleSearchBtn.setAttribute('data-tooltip', 'Search for artist/band');
+    singleSearchBtn.innerHTML = '<i class="fas fa-search"></i>';
+    singleSearchBtn.style.cssText = `
+      width: 24px;
+      height: 24px;
+      padding: 4px;
+      margin-left: 4px;
+      background: rgba(66, 153, 225, 0.8);
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      vertical-align: middle;
+      transition: all 0.2s ease;
+    `;
+    singleSearchBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const title = link.textContent?.trim() || '';
+      // 提取艺术家或乐队名称，忽略括号中的内容
+      const artistMatch = title.match(/\)\s*([^\-]+)\s*-\s*/);
+      const artist = artistMatch ? artistMatch[1].trim() : '';
+      if (artist) {
+        const searchUrl = `https://rutracker.org/forum/tracker.php?nm=${encodeURIComponent(artist)}`;
+        window.open(searchUrl, '_blank');
+      } else {
+        alert('Could not extract artist/band name from title.');
+      }
+    });
+
     checkboxes.set(id, checkbox);
+    div.insertBefore(singleSearchBtn, div.firstChild);
     div.insertBefore(singlePreviewBtn, div.firstChild);
     div.insertBefore(singleDownloadBtn, div.firstChild);
     div.insertBefore(checkbox, div.firstChild);
@@ -940,12 +977,26 @@ function setupToolbarHandlers() {
   });
 }
 
+// 确保 Font Awesome 已加载
+function ensureFontAwesomeLoaded() {
+  if (!document.querySelector('link[href*="font-awesome"]')) {
+    const fontAwesome = document.createElement('link');
+    fontAwesome.rel = 'stylesheet';
+    fontAwesome.href = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css';
+    document.head.appendChild(fontAwesome);
+  }
+}
+
 // 修改页面加载事件监听
-// 将 DOMContentLoaded 改为 load，因为有些内容可能在 DOMContentLoaded 后才加载
 window.addEventListener('load', () => {
+  ensureFontAwesomeLoaded(); // 确保 Font Awesome 已加载
   if (window.location.href.includes('viewforum.php')) {
     setTimeout(() => {
       injectToolbar();
+    }, 500); // 添加小延迟确保页面完全加载
+  } else if (window.location.href.includes('tracker.php?nm=')) {
+    setTimeout(() => {
+      injectSearchResultButtons();
     }, 500); // 添加小延迟确保页面完全加载
   }
 });
@@ -1024,4 +1075,77 @@ function handleDownloadStatus(status: string, error?: string) {
       }
       break;
   }
+}
+
+// 添加搜索结果页面的按钮注入逻辑
+function injectSearchResultButtons() {
+  document.querySelectorAll('.wbr.t-title').forEach(titleElement => {
+    const link = titleElement.querySelector('a');
+    if (!link) return;
+
+    const id = link.getAttribute('href')?.match(/t=(\d+)/)?.[1];
+    if (!id) return;
+
+    // 创建单个下载按钮
+    const singleDownloadBtn = document.createElement('button');
+    singleDownloadBtn.className = 'single-download';
+    singleDownloadBtn.setAttribute('data-tooltip', 'Download this torrent');
+    singleDownloadBtn.innerHTML = '<i class="fas fa-file-download"></i>';
+    singleDownloadBtn.style.cssText = `
+      width: 24px;
+      height: 24px;
+      padding: 4px;
+      margin-right: 4px;
+      background: rgba(72, 187, 120, 0.8);
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      vertical-align: middle;
+      transition: all 0.2s ease;
+    `;
+    singleDownloadBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const url = `https://rutracker.org/forum/dl.php?t=${id}`;
+      const title = link.textContent?.trim() || 'Unknown Title';
+      await downloadTorrent(url, title);
+    });
+
+    // 创建单个预览按钮
+    const singlePreviewBtn = document.createElement('button');
+    singlePreviewBtn.className = 'single-preview';
+    singlePreviewBtn.setAttribute('data-tooltip', 'Preview this topic');
+    singlePreviewBtn.innerHTML = '<i class="fas fa-eye"></i>';
+    singlePreviewBtn.style.cssText = `
+      width: 24px;
+      height: 24px;
+      padding: 4px;
+      margin-right: 4px;
+      background: rgba(66, 153, 225, 0.8);
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      vertical-align: middle;
+      transition: all 0.2s ease;
+    `;
+    singlePreviewBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const url = link.getAttribute('href');
+      if (url) {
+        window.open(url.startsWith('http') ? url : `https://rutracker.org/forum/${url}`, '_blank');
+      }
+    });
+
+    titleElement.insertBefore(singlePreviewBtn, link);
+    titleElement.insertBefore(singleDownloadBtn, link);
+  });
 }
