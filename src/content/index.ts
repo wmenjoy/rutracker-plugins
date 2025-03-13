@@ -713,12 +713,19 @@ function setupToolbarHandlers() {
       vertical-align: middle;
       transition: all 0.2s ease;
     `;
-    singlePreviewBtn.addEventListener('click', (e) => {
+    singlePreviewBtn.addEventListener('click', async (e) => {
       e.preventDefault();
       e.stopPropagation();
-      const url = link.getAttribute('href');
-      if (url) {
-        window.open(url.startsWith('http') ? url : `https://rutracker.org/forum/${url}`, '_blank');
+      const url = `https://rutracker.org/forum/dl.php?t=${id}`;
+      const title = link.textContent?.trim() || 'Unknown Title';
+      try {
+        await downloadTorrent(url, title);
+        const pageUrl = link.getAttribute('href');
+        if (pageUrl) {
+          window.open(pageUrl.startsWith('http') ? pageUrl : `https://rutracker.org/forum/${pageUrl}`, '_blank');
+        }
+      } catch (error) {
+        console.error('Failed to download and open page:', error);
       }
     });
     
@@ -747,9 +754,9 @@ function setupToolbarHandlers() {
       e.preventDefault();
       e.stopPropagation();
       const title = link.textContent?.trim() || '';
-      // 提取艺术家或乐队名称，忽略括号中的内容
-      const artistMatch = title.match(/\)\s*([^\-]+)\s*-\s*/);
-      const artist = artistMatch ? artistMatch[1].trim() : '';
+      // 提取艺术家或乐队名称，处理复杂的标题
+      const artistMatch = title.match(/\)\s*\[.*?\]\s*([^\-]+)\s*-\s*|\)\s*([^\-]+)\s*-\s*/);
+      const artist = artistMatch ? (artistMatch[1] || artistMatch[2]).trim() : '';
       if (artist) {
         const searchUrl = `https://rutracker.org/forum/tracker.php?nm=${encodeURIComponent(artist)}`;
         window.open(searchUrl, '_blank');
@@ -994,7 +1001,7 @@ window.addEventListener('load', () => {
     setTimeout(() => {
       injectToolbar();
     }, 500); // 添加小延迟确保页面完全加载
-  } else if (window.location.href.includes('tracker.php?nm=')) {
+  } else if (window.location.href.includes('tracker.php?')) {
     setTimeout(() => {
       injectSearchResultButtons();
     }, 500); // 添加小延迟确保页面完全加载
@@ -1136,12 +1143,19 @@ function injectSearchResultButtons() {
       vertical-align: middle;
       transition: all 0.2s ease;
     `;
-    singlePreviewBtn.addEventListener('click', (e) => {
+    singlePreviewBtn.addEventListener('click', async (e) => {
       e.preventDefault();
       e.stopPropagation();
-      const url = link.getAttribute('href');
-      if (url) {
-        window.open(url.startsWith('http') ? url : `https://rutracker.org/forum/${url}`, '_blank');
+      const url = `https://rutracker.org/forum/dl.php?t=${id}`;
+      const title = link.textContent?.trim() || 'Unknown Title';
+      try {
+        await downloadTorrent(url, title);
+        const pageUrl = link.getAttribute('href');
+        if (pageUrl) {
+          window.open(pageUrl.startsWith('http') ? pageUrl : `https://rutracker.org/forum/${pageUrl}`, '_blank');
+        }
+      } catch (error) {
+        console.error('Failed to download and open page:', error);
       }
     });
 
