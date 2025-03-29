@@ -370,6 +370,59 @@ function goToNextPage() {
   window.location.href = url.toString();
 }
 
+// 添加一个新函数用于导航到上一页
+function goToPrevPage() {
+  const url = new URL(window.location.href);
+  const forumId = url.searchParams.get('f');
+  if (!forumId) return;
+
+  // 获取当前的 start 参数
+  let currentStart = parseInt(url.searchParams.get('start') || '0');
+  
+  // 计算上一页的 start 值，但不小于0
+  const prevStart = Math.max(0, currentStart - 50);
+  
+  // 如果已经是第一页，不执行任何操作
+  if (currentStart === 0) return;
+  
+  // 构造新的 URL
+  url.searchParams.set('start', prevStart.toString());
+  
+  // 跳转到上一页
+  window.location.href = url.toString();
+}
+
+// 添加键盘导航功能
+function setupKeyboardNavigation() {
+  // 避免在输入框中触发导航
+  const isInputFocused = () => {
+    const activeElement = document.activeElement;
+    return activeElement && (
+      activeElement.tagName === 'INPUT' || 
+      activeElement.tagName === 'TEXTAREA' || 
+      // 修复类型错误，使用 HTMLElement 类型断言
+      (activeElement instanceof HTMLElement && activeElement.isContentEditable)
+    );
+  };
+
+  document.addEventListener('keydown', (event) => {
+    // 只在viewforum.php页面上激活键盘导航
+    if (!window.location.href.includes('viewforum.php')) return;
+    
+    // 避免在输入框中触发导航
+    if (isInputFocused()) return;
+
+    switch (event.key) {
+      case 'ArrowLeft':
+        goToPrevPage();
+        break;
+      case 'ArrowRight':
+        goToNextPage();
+        break;
+    }
+  });
+}
+
 // 添加工具栏到页面
 function injectToolbar() {
   // 检查是否已存在工具栏
@@ -616,6 +669,12 @@ function injectToolbar() {
       <button id="toggle-read-status" data-tooltip="Select Unread">
         <i class="fas fa-eye-slash"></i>
       </button>
+      <button id="recent-years-filter" data-tooltip="Select Last 2 Years">
+        <i class="fas fa-calendar-alt"></i>
+      </button>
+      <button id="current-year-filter" data-tooltip="Select Current Year">
+        <i class="fas fa-calendar-day"></i>
+      </button>
       <button id="batch-preview" data-tooltip="Preview Selected">
         <i class="fas fa-eye"></i>
       </button>
@@ -820,6 +879,9 @@ function setupToolbarHandlers() {
       if (!id) return;
 
       const isUnread = div.innerHTML.includes('class="t-is-unread"');
+      
+
+     
       const checkbox = checkboxes.get(id);
       if (checkbox) {
         checkbox.checked = isSelectingUnread ? isUnread : !isUnread;
@@ -838,6 +900,124 @@ function setupToolbarHandlers() {
       isSelectingUnread = !isSelectingUnread;
     }
     
+    updateSelectedCount();
+  });
+
+  // 添加辅助函数，用于从标题中提取年份
+  function extractYearsFromTitle(title: string): number[] {
+    // 匹配形如"2023-2025"、"2023,2024,2025"或单独的年份"2025"的模式
+    const yearRangeRegex = /(\d{4})\s*[-,]\s*(\d{4})/g;
+    const singleYearRegex = /\b(19\d{2}|20\d{2})\b/g;
+    
+    const years: number[] = [];
+    
+    // 处理年份范围
+    let rangeMatch;
+    while ((rangeMatch = yearRangeRegex.exec(title)) !== null) {
+      const startYear = parseInt(rangeMatch[1]);
+      const endYear = parseInt(rangeMatch[2]);
+      
+      // 确保年份是有效的（避免如1000-2000这样的错误范围）
+      if (startYear >= 1900 && endYear <= 2100 && startYear <= endYear) {
+        // 添加范围内的所有年份
+        for (let year = startYear; year <= endYear; year++) {
+          if (!years.includes(year)) {
+            years.push(year);
+          }
+        }
+      }
+    }
+    
+    // 处理单独的年份
+    let singleMatch;
+    while ((singleMatch = singleYearRegex.exec(title)) !== null) {
+      const year = parseInt(singleMatch[1]);
+      if (!years.includes(year)) {
+        years.push(year);
+      }
+    }
+    
+    return years;
+  }
+
+  // 修改最近两年过滤按钮的处理逻辑
+  const recentYearsFilterButton = document.getElementById('recent-years-filter');
+  
+  recentYearsFilterButton?.addEventListener('click', () => {
+    const currentYear = new Date().getFullYear();
+    const lastYear = currentYear - 1;
+    const recentYears = [currentYear, lastYear];
+    
+    document.querySelectorAll('div.torTopic').forEach(div => {
+
+      const hasAttachIcon = div.querySelector('img.t-icon-attach');
+      const hasConsumedIcon = div.querySelector('span.tor-icon.tor-consumed');
+      if (hasAttachIcon || hasConsumedIcon) return;
+
+      const isUnread = div.innerHTML.includes('class="t-is-unread"');
+      if (!isUnread) return;
+
+      const id = div.querySelector('a')?.getAttribute('href')?.match(/t=(\d+)/)?.[1];
+      if (!id) return;
+
+      const link = div.querySelector('a.torTopic.bold, a.tt-text, a.gen.tt-text');
+      const title = link?.textContent?.trim() || '';
+      
+      // 从标题中提取年份
+      const yearsInTitle = extractYearsFromTitle(title);
+      
+      // 检查是否包含最近两年中的任何一年
+      const hasRecentYear = yearsInTitle.some(year => recentYears.includes(year));
+      
+      // 获取对应的复选框并设置选中状态
+      const checkbox = checkboxes.get(id);
+      if (checkbox) {
+        checkbox.checked = hasRecentYear;
+      }
+    });
+    
+    // 更新选中计数
+    updateSelectedCount();
+  });
+
+  // 添加当前年份过滤按钮的处理逻辑
+  const currentYearFilterButton = document.getElementById('current-year-filter');
+  
+  currentYearFilterButton?.addEventListener('click', () => {
+    const currentYear = new Date().getFullYear();
+    
+    document.querySelectorAll('div.torTopic').forEach(div => {
+      // 过滤掉已消费或有附件图标的主题
+      const hasAttachIcon = div.querySelector('img.t-icon-attach');
+      const hasConsumedIcon = div.querySelector('span.tor-icon.tor-consumed');
+      if (hasAttachIcon || hasConsumedIcon) return;
+
+      // 只选择未读主题
+      const isUnread = div.innerHTML.includes('class="t-is-unread"');
+      if (!isUnread) return;
+
+      const id = div.querySelector('a')?.getAttribute('href')?.match(/t=(\d+)/)?.[1];
+      if (!id) return;
+
+      const link = div.querySelector('a.torTopic.bold, a.tt-text');
+      if (!link) return;
+
+
+      const title = link.textContent?.trim() || '';
+      // 从标题中提取年份
+      const yearsInTitle = extractYearsFromTitle(title);
+      
+      // 检查是否包含当前年份
+      const hasCurrentYear = yearsInTitle.includes(currentYear);
+      
+      // 获取对应的复选框并设置选中状态
+      const checkbox = checkboxes.get(id);
+      if (checkbox) {
+        checkbox.checked = hasCurrentYear;
+      }
+    });
+    
+    // 更新选中计数
     updateSelectedCount();
   });
 
@@ -994,13 +1174,14 @@ function ensureFontAwesomeLoaded() {
   }
 }
 
-// 修改页面加载事件监听
+// 修改页面加载事件监听，添加键盘导航初始化
 window.addEventListener('load', () => {
   ensureFontAwesomeLoaded(); // 确保 Font Awesome 已加载
   if (window.location.href.includes('viewforum.php')) {
     setTimeout(() => {
       injectToolbar();
-    }, 500); // 添加小延迟确保页面完全加载
+      setupKeyboardNavigation(); // 添加键盘导航
+    }, 300); // 添加小延迟确保页面完全加载
   } else if (window.location.href.includes('tracker.php?')) {
     setTimeout(() => {
       injectSearchResultButtons();
