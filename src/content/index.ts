@@ -1174,9 +1174,42 @@ function ensureFontAwesomeLoaded() {
   }
 }
 
-// 修改页面加载事件监听，添加键盘导航初始化
+// 添加监听文本选择的功能
+function setupTextSelectionSearch() {
+  // 只在 rutracker.org 域名下运行
+  if (!window.location.hostname.includes('rutracker.org')) return;
+
+  // 使用统一的选择处理
+  document.addEventListener('mouseup', () => {
+    setTimeout(() => {
+      const selection = window.getSelection();
+      const selectedText = selection ? selection.toString().trim() : '';
+      
+      if (selectedText) {
+        // 限制长度，防止菜单显示过长
+        const truncatedText = selectedText.length > 30 
+          ? selectedText.substring(0, 30) + '...' 
+          : selectedText;
+          
+        // 更新右键菜单
+        chrome.runtime.sendMessage({
+          action: 'updateContextMenu',
+          text: truncatedText
+        });
+      }
+    }, 10); // 小延迟确保选择已完成
+  });
+
+  console.log('Text selection search feature initialized with improved reliability');
+}
+
+// 修改页面加载事件监听，添加文本选择搜索功能
 window.addEventListener('load', () => {
   ensureFontAwesomeLoaded(); // 确保 Font Awesome 已加载
+  
+  // 添加文本选择搜索功能
+  setupTextSelectionSearch();
+  
   if (window.location.href.includes('viewforum.php')) {
     setTimeout(() => {
       injectToolbar();

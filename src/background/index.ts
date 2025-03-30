@@ -3,17 +3,26 @@ chrome.runtime.onInstalled.addListener(async () => {
   try {
     // 初始化存储
     await chrome.storage.local.set({ torrents: [] });
+
+    // 创建右键菜单 - 初始创建论坛搜索菜单（隐藏状态）
+    chrome.contextMenus.create({
+      id: 'nextPage',
+      title: 'Next Page',
+      contexts: ['page'],
+      documentUrlPatterns: ['*://rutracker.org/forum/viewforum.php?f=*']
+    });
+
+    // 初始创建搜索菜单项（默认隐藏）
+    chrome.contextMenus.create({
+      id: 'searchRuTrackerForum',
+      title: '在RuTracker论坛中搜索 "%s"',
+      contexts: ['selection'],
+      documentUrlPatterns: ['*://*.rutracker.org/*'],
+      visible: false
+    });
   } catch (error) {
     console.error('Failed to initialize extension:', error);
   }
-
-  // 创建右键菜单
-  chrome.contextMenus.create({
-    id: 'nextPage',
-    title: 'Next Page',
-    contexts: ['page'],
-    documentUrlPatterns: ['*://rutracker.org/forum/viewforum.php?f=*']
-  });
 });
 
 // 处理下载请求
@@ -28,6 +37,38 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
     return true; // 表示将异步发送响应
   }
+  
+  if (message.action === 'updateContextMenu') {
+    try {
+      // 更新菜单项而不是删除重建
+      chrome.contextMenus.update('searchRuTrackerForum', {
+        title: `在RuTracker论坛中搜索 "${message.text}"`,
+        visible: true
+      });
+      console.log('Context menu updated:', message.text);
+      sendResponse({ success: true });
+    } catch (error) {
+      console.error('Failed to update context menu:', error);
+      // 如果更新失败，尝试重新创建
+      try {
+        chrome.contextMenus.remove('searchRuTrackerForum', () => {
+          chrome.contextMenus.create({
+            id: 'searchRuTrackerForum',
+            title: `在RuTracker论坛中搜索 "${message.text}"`,
+            contexts: ['selection'],
+            documentUrlPatterns: ['*://*.rutracker.org/*']
+          });
+        });
+        sendResponse({ success: true });
+      } catch (innerError) {
+        console.error('Failed to recreate context menu:', innerError);
+        sendResponse({ success: false, error: String(innerError) });
+      }
+    }
+    return true;
+  }
+  
+  return true; // 表示将异步发送响应
 });
 
 // 下载处理函数
@@ -148,5 +189,15 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === 'nextPage' && tab?.id) {
     chrome.tabs.sendMessage(tab.id, { action: 'goToNextPage' });
+  }
+  
+  if (info.menuItemId === 'searchRuTrackerForum' && tab?.id) {
+    // 使用info.selectionText而不是依赖消息传递
+    const textToSearch = info.selectionText || '';
+    if (textToSearch) {
+      const searchUrl = `https://rutracker.org/forum/tracker.php?nm=${encodeURIComponent(textToSearch)}`;
+      // 直接从background打开而不是发消息给content script
+      chrome.tabs.create({ url: searchUrl });
+    }
   }
 });
